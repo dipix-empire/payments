@@ -1,0 +1,52 @@
+services:
+    payments-dev:
+        build:
+            dockerfile: ./development.Dockerfile
+        ports:
+            - "3200:3200"
+            - "5555:5555"
+        volumes:
+            - ".:/app:rw"
+        environment:
+            - DATABASE_URL=mongodb://payments-db-dev:27017/payments
+            - REDIS_URL=redis://payments-messages-dev:6379
+            # I really dont want to setup dipix-auth here...
+            - BYPASS_AUTH_ONLY_ENABLE_IN_DEV_MODE=true
+        depends_on:
+            payments-db-dev:
+                condition: service_started
+            payments-db-init:
+                condition: service_completed_successfully
+            payments-messages-dev:
+                condition: service_started
+
+    payments-messages-dev:
+        image: redis:alpine
+        ports:
+            - 6379:6379
+        tty: true
+        stdin_open: true
+        command: redis-server --save 20 1
+
+    payments-db-dev:
+        image: mongo
+        attach: false
+        command: [ "--replSet", "rs0", "--bind_ip_all" ]
+        ports:
+            - "27018:27017"
+        volumes:
+            - "payments-db-dev-data:/data/db"
+
+    # Hook to initiate MongoDB replica config
+    payments-db-init:
+        image: mongo
+        restart: "no"
+        attach: false
+        depends_on:
+            payments-db-dev:
+                condition: service_started
+        command: sh -c "sleep 2 && mongosh mongodb://payments-db-dev:27017/ --eval 'try { rs.initiate({ _id:\"rs0\", members:[{_id:0, host:\"payments-db-dev:27017\"}]}) } catch(err) { console.log(err) }'"
+
+volumes:
+    payments-db-dev-data:
+    payments-messages-data:
